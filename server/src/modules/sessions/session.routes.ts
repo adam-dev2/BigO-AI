@@ -5,9 +5,9 @@ import { createSession, endSession, getSession, getSessionById } from './session
 const router = express.Router();
 
 router.use(authMiddleware);
-router.post('/session',createSession);
-router.get('/session',getSession);
-router.get('/session/:id',getSessionById);
-router.patch('/session/:id',endSession);
+router.post('/sessions',createSession);
+router.get('/sessions',getSession);
+router.get('/sessions/:id',getSessionById);
+router.patch('/sessions/:id',endSession);
 
 export default router;
