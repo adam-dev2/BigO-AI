@@ -2,7 +2,9 @@ import app from './app.js';
 import { createServer } from 'http';
 import { initSocket } from './socket/index.js';
 import { PORT } from './config/env.js';
+import { testDB } from './config/db.js';
 
+testDB();
 const httpServer = createServer(app);
 initSocket(httpServer);
 

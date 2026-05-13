@@ -1,0 +1,256 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+//  ENUMS
+// ============================================================
+
+enum PlanType {
+  free
+  pro
+  scale
+}
+
+enum PlanStatus {
+  active
+  cancelled
+  past_due
+  trialing
+}
+
+enum SessionStatus {
+  created
+  active
+  completed
+  abandoned
+  error
+}
+
+enum SessionDifficulty {
+  easy
+  medium
+  hard
+}
+
+enum EventType {
+  session_started
+  session_ended
+  transcript_user
+  transcript_ai
+  code_snapshot
+  ai_question
+  hint_given
+  interruption
+  pause
+  resume
+}
+
+// ============================================================
+//  USERS
+// ============================================================
+
+model User {
+  id                   String    @id @default(uuid()) @db.Uuid
+  email                String    @unique
+  passwordHash         String    @map("password_hash")
+  username             String?   @map("username")
+  avatarUrl            String?   @map("avatar_url")
+
+  plan                 PlanType  @default(free)
+  planStatus           PlanStatus @default(active) @map("plan_status")
+
+  stripeCustomerId     String?   @unique @map("stripe_customer_id")
+  stripeSubscriptionId String?   @unique @map("stripe_subscription_id")
+
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  lastLoginAt          DateTime? @map("last_login_at")
+
+  // relations
+  subscriptions        Subscription[]
+  sessions             Session[]
+  usageTracking        UsageTracking[]
+  feedbackReports      FeedbackReport[]
+
+  @@index([email])
+  @@index([stripeCustomerId])
+  @@map("users")
+}
+
+// ============================================================
+//  SUBSCRIPTIONS
+// ============================================================
+
+model Subscription {
+  id                   String     @id @default(uuid()) @db.Uuid
+  userId               String     @map("user_id") @db.Uuid
+
+  stripeSubscriptionId String     @unique @map("stripe_subscription_id")
+  stripePriceId        String     @map("stripe_price_id")
+  plan                 PlanType
+  status               PlanStatus @default(active)
+
+  currentPeriodStart   DateTime   @map("current_period_start")
+  currentPeriodEnd     DateTime   @map("current_period_end")
+  trialEnd             DateTime?  @map("trial_end")
+
+  cancelledAt          DateTime?  @map("cancelled_at")
+  createdAt            DateTime   @default(now()) @map("created_at")
+  updatedAt            DateTime   @updatedAt @map("updated_at")
+
+  // relations
+  user                 User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("subscriptions")
+}
+
+// ============================================================
+//  USAGE TRACKING
+// ============================================================
+
+model UsageTracking {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  date          DateTime @default(dbgenerated("CURRENT_DATE")) @db.Date
+  sessionsCount Int      @default(0) @map("sessions_count")
+
+  // relations
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@map("usage_tracking")
+}
+
+// ============================================================
+//  SESSIONS
+// ============================================================
+
+model Session {
+  id              String            @id @default(uuid()) @db.Uuid
+  userId          String            @map("user_id") @db.Uuid
+
+  status          SessionStatus     @default(created)
+  difficulty      SessionDifficulty @default(medium)
+  topic           String?
+  problemTitle    String?           @map("problem_title")
+  companyFocus    String?           @map("company_focus")
+
+  startedAt       DateTime?         @map("started_at")
+  endedAt         DateTime?         @map("ended_at")
+  durationSeconds Int?              @map("duration_seconds")
+
+  planAtTime      PlanType          @default(free) @map("plan_at_time")
+
+  audioUrl        String?           @map("audio_url")
+  replayAvailable Boolean           @default(false) @map("replay_available")
+
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  // relations
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events          SessionEvent[]
+  feedbackReport  FeedbackReport?
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@map("sessions")
+}
+
+// ============================================================
+//  SESSION EVENTS
+// ============================================================
+
+model SessionEvent {
+  id         String    @id @default(uuid()) @db.Uuid
+  sessionId  String    @map("session_id") @db.Uuid
+  eventType  EventType @map("event_type")
+  ts         DateTime  @default(now())
+  offsetMs   Int?      @map("offset_ms")
+  payload    Json      @default("{}")
+
+  // relations
+  session    Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([sessionId, ts])
+  @@map("session_events")
+}
+
+// ============================================================
+//  FEEDBACK REPORTS
+// ============================================================
+
+model FeedbackReport {
+  id                   String   @id @default(uuid()) @db.Uuid
+  sessionId            String   @unique @map("session_id") @db.Uuid
+  userId               String   @map("user_id") @db.Uuid
+
+  scoreOverall         Decimal? @map("score_overall") @db.Decimal(4, 1)
+  scoreProblemSolving  Decimal? @map("score_problem_solving") @db.Decimal(4, 1)
+  scoreCommunication   Decimal? @map("score_communication") @db.Decimal(4, 1)
+  scoreCodeQuality     Decimal? @map("score_code_quality") @db.Decimal(4, 1)
+  scoreTimeComplexity  Decimal? @map("score_time_complexity") @db.Decimal(4, 1)
+
+  summary              String?
+  strengths            String[]
+  improvements         String[]
+  hintsTaken           Int      @default(0) @map("hints_taken")
+
+  rawJson              Json?    @map("raw_json")
+
+  generatedAt          DateTime @default(now()) @map("generated_at")
+
+  // relations
+  session              Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([sessionId])
+  @@map("feedback_reports")
+}
+
+// ============================================================
+//  PROBLEMS BANK
+// ============================================================
+
+model Problem {
+  id         String            @id @default(uuid()) @db.Uuid
+  title      String
+  slug       String            @unique
+  difficulty SessionDifficulty
+  topic      String
+  description String
+  hints      Json              @default("[]")
+  companies  String[]
+  isActive   Boolean           @default(true) @map("is_active")
+  createdAt  DateTime          @default(now()) @map("created_at")
+
+  @@index([difficulty])
+  @@index([topic])
+  @@map("problems")
+}
+
+// ============================================================
+//  STRIPE WEBHOOK EVENTS
+// ============================================================
+
+model StripeEvent {
+  id          String    @id                        // Stripe event id e.g. evt_xxx
+  type        String
+  payload     Json
+  processedAt DateTime? @map("processed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([type])
+  @@index([processedAt])
+  @@map("stripe_events")
+}

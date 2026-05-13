@@ -1,6 +1,6 @@
 import pkg from 'pg';
 import { logger } from '../lib/logger.js';
-import { DATABASE_URL } from './env.js';
+import { DATABASE_URL, isProduction } from './env.js';
 
 const { Pool } = pkg;
 
@@ -11,10 +11,9 @@ if (!DATABASE_URL) {
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  ssl:{ rejectUnauthorized: false },
 });
+
 
 export const testDB = async () => {
   try {
@@ -24,5 +23,6 @@ export const testDB = async () => {
     logger.error('DB Connection Error', err);
   }
 };
+
 
 export default pool;

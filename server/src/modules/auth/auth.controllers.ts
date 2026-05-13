@@ -7,6 +7,21 @@ import { logger } from "../../lib/logger.js"
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import { isProduction, JWT_SECRET } from "../../config/env.js"
+import prisma from '../../lib/prisma.js';
+
+interface ICookieOptions {
+    httpOnly:boolean,
+    secure:boolean,
+    sameSite:'none' | 'lax' | 'strict' | boolean,
+    maxAge:number
+}
+
+const CookieOptions:ICookieOptions = {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'none',
+    maxAge: 1000 * 60 * 60 * 24 * 7
+}
 
 export const googleAuthenticate = () => {
      passport.authenticate('google', {
@@ -34,17 +49,27 @@ export const register = asyncHandler(async (req, res) => {
         throw new ApiError(400,'All fields are required');
     }
 
-    try {
-        const findUser = await pool.query('SELECT * FROM users WHERE email = $1',[email]);
-        if(findUser.rowCount === 0) {
-            throw new ApiError(400,'Email already exists');
+    const findUser = await prisma?.user.findUnique({
+        where:{
+            email
         }
+    });
+    if(findUser) {
+        throw new ApiError(400,'Email already exists');
+    }
+    try {
         const password_hash = await bcrypt.hash(password,10);
-
-        const createUser = (await pool.query('INSERT INTO users (username, email, password_hash) VALUES($1,$2,$3)',[username,email,password_hash]));
+        const createUser = await prisma?.user.create({
+            data:{
+                username:username,
+                email:email,
+                passwordHash:password_hash
+            }
+        })
         const userDetails = {
-            username:createUser.rows[0].username,
-            email:createUser.rows[0].email
+            userId:createUser.id,
+            username:createUser?.username,
+            email:createUser?.email
         }
         return res.status(201).json({
             successs:true,
@@ -62,49 +87,40 @@ export const login = asyncHandler(async (req,res) => {
     if(!email || !password) {
         throw new ApiError(400,'creds are required');
     }
-    const findUser = await pool.query('SELECT * FROM users WHERE email = $1',[email]);
-    if (findUser.rowCount === 0) {
+    const findUser = await prisma.user.findUnique({
+        where:{
+            email:email
+        }
+    })
+    if (!findUser) {
         throw new ApiError(401,'Invalid Creds');
     }
-    const verifyPass = await bcrypt.compare(password,findUser.rows[0].password_hash);
+    const verifyPass = await bcrypt.compare(password,findUser.passwordHash);
     if(!verifyPass) {
         throw new ApiError(401,'Invalid Creds');
     }
-    const userDetails = {
-        username:findUser.rows[0].username,
-        email:findUser.rows[0].email
-    }
     const tokenContent = {
-        email:userDetails.email,
-        username:userDetails.username
+        userId:findUser.id,
+        email:findUser.email,
+        username:findUser.username
     }
     const token = jwt.sign(tokenContent,JWT_SECRET!,{
         expiresIn:'7d'
     }); 
-    res.cookie('token',token,{
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: 'none',
-        maxAge: 1000 * 60 * 60 * 24 * 7
-    })
+    res.cookie('token',token,CookieOptions)
     return res.status(200).json({
         success:true,
-        user:userDetails
+        user:tokenContent.username,
+        token
     })
 })
 
-export const logout = (req:Request, res:Response,next:NextFunction) => {
-  req.logout((err:any) => {
-    if (err) return next(err);
-
-    req.session.destroy(() => {
-      res.clearCookie('connect.sid');
-      res.json({
-        message: 'Logged out',
-      });
-    });
-  });
-}
+export const logout = asyncHandler(async(req:Request,res:Response) => {
+    res.clearCookie('token',CookieOptions);
+    return res.status(200).json({
+        success:true
+    })
+})
 
 export const me = (req:Request, res:Response) => {
   res.json(req.user);
